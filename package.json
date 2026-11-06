@@ -2,7 +2,7 @@
   "name": "dxf-viewer",
   "displayName": "DXF Viewer & CAD Viewer for 2D Drawings",
   "description": "DXF viewer and CAD viewer that opens ASCII and binary .dxf drawings in VS Code with layers, pan, zoom, measure, blocks, text, dimensions and PNG or SVG export.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "zovo",
   "license": "MIT",
   "icon": "icon.png",
@@ -91,6 +91,16 @@
         "command": "dxfViewer.openWith",
         "title": "Open in DXF Viewer",
         "category": "DXF Viewer"
+      },
+      {
+        "command": "dxfViewer.supportDeveloper",
+        "title": "Support the developer",
+        "category": "DXF Viewer"
+      },
+      {
+        "command": "dxfViewer.moreViewers",
+        "title": "More free viewers",
+        "category": "DXF Viewer"
       }
     ],
     "menus": {
@@ -120,15 +130,28 @@
         },
         "dxfViewer.background": {
           "type": "string",
-          "enum": ["auto", "dark", "light"],
+          "enum": [
+            "auto",
+            "dark",
+            "light"
+          ],
           "default": "auto",
-          "enumDescriptions": ["Follow the VS Code theme", "Dark background, like most CAD programs", "White background, like a printed sheet"],
+          "enumDescriptions": [
+            "Follow the VS Code theme",
+            "Dark background, like most CAD programs",
+            "White background, like a printed sheet"
+          ],
           "description": "Background of the drawing when a file opens. The toolbar button switches it per tab."
         },
         "dxfViewer.askForRating": {
           "type": "boolean",
           "default": true,
           "description": "Ask one time for a Marketplace rating after you have used DXF Viewer for a few days. You can answer \"Later\" or \"Don't ask again\". Nothing is sent anywhere."
+        },
+        "dxfViewer.showSupportLinks": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the small Sponsor and More free viewers links at the bottom of the viewer. The change shows in files you open next. Nothing is sent anywhere."
         }
       }
     },
@@ -194,5 +217,8 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/theluckystrike/dxf-viewer-vscode"
+  },
+  "sponsor": {
+    "url": "https://github.com/sponsors/theluckystrike"
   }
 }

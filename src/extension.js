@@ -6,6 +6,7 @@ const { buildHtml } = require('./html');
 const { validateWebviewMessage, validateWorkerMessage, sizePlan, fmtSize, dwgInfo, exportName } = require('./core/protocol');
 const { sniff } = require('./core/reader');
 const { createRatingPrompt } = require('./rate');
+const { registerSupport, commandUris, showLinks } = require('./support');
 
 const VIEW_TYPE = 'dxfViewer.preview';
 const VIEW_TYPE_DWG = 'dxfViewer.dwgNotice';
@@ -50,13 +51,15 @@ class DxfEditorProvider {
     const uri = document.uri;
     const dist = vscode.Uri.joinPath(ctx.extensionUri, 'dist');
     const media = vscode.Uri.joinPath(ctx.extensionUri, 'media');
-    panel.webview.options = { enableScripts: true, localResourceRoots: [dist, media] };
+    // Command links are limited to the two support commands and the settings page (footer "Hide" link).
+    panel.webview.options = { enableScripts: true, localResourceRoots: [dist, media], enableCommandUris: commandUris('dxfViewer') };
     const name = path.posix.basename(uri.path);
     panel.webview.html = buildHtml({
       cspSource: panel.webview.cspSource,
       scriptUri: panel.webview.asWebviewUri(vscode.Uri.joinPath(dist, 'webview.js')).toString(),
       styleUri: panel.webview.asWebviewUri(vscode.Uri.joinPath(media, 'webview.css')).toString(),
       title: name,
+      showSupportLinks: showLinks(vscode, 'dxfViewer'),
     });
     let disposed = false;
     let counted = false; // one success per opened tab, for the rating prompt
@@ -136,6 +139,7 @@ async function readHead(uri) {
 
 function activate(context) {
   rating = createRatingPrompt({ vscode, context, extensionId: EXT_ID, section: 'dxfViewer', message: (n) => `DXF Viewer has opened ${n} drawings for you. A rating helps other people find it.` });
+  registerSupport({ vscode, context, prefix: 'dxfViewer', selfId: EXT_ID });
   const opts = { supportsMultipleEditorsPerDocument: true, webviewOptions: { retainContextWhenHidden: true } };
   context.subscriptions.push(
     vscode.window.registerCustomEditorProvider(VIEW_TYPE, new DxfEditorProvider(context, 'dxf'), opts),

@@ -2,6 +2,9 @@
 /* global acquireVsCodeApi */
 const vscode = acquireVsCodeApi();
 const app = document.getElementById('app');
+// The host renders the Sponsor and More free viewers line outside #app (or leaves it out when the setting hides it).
+// It is kept here so each new drawing view can take it into its bottom bar.
+const supportLine = document.getElementById('zovo-support');
 
 const S = {
   model: null, name: '', sizeText: '', ms: 0,
@@ -400,7 +403,9 @@ function showModel(msg) {
   statusEl = el('div', { class: 'status' });
   measureEl = el('div', { class: 'measure', hidden: '' });
   const copyBtn = button('Copy', 'copymeasure', () => vscode.postMessage({ type: 'copy', text: measureText() }), 'Copy the measurement');
-  wrapEl = el('div', { class: 'canvaswrap' }, canvas, el('div', { class: 'bar' }, statusEl, measureEl, copyBtn));
+  const bar = el('div', { class: 'bar' }, statusEl, measureEl, copyBtn);
+  if (supportLine) bar.append(supportLine);
+  wrapEl = el('div', { class: 'canvaswrap' }, canvas, bar);
   wrapEl.dataset.bg = S.bg;
   const toast = el('div', { class: 'toast', hidden: '' });
   app.replaceChildren(head, el('div', { class: 'main' }, side, wrapEl), toast);

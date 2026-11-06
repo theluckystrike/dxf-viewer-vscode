@@ -63,9 +63,9 @@ const broken = path.join(tmp, 'broken.dxf'); fs.writeFileSync(broken, 'this is n
 test('activate registers the DXF editor, the DWG notice and the commands; manifest matches', () => {
   ext.activate(ctxOf());
   assert.deepEqual(vscodeMock.window.registered.map((r) => r[0]), ['dxfViewer.preview', 'dxfViewer.dwgNotice']);
-  assert.deepEqual(vscodeMock.commands.list.sort(), ['dxfViewer.openWalkthrough', 'dxfViewer.openWith']);
+  assert.deepEqual(vscodeMock.commands.list.sort(), ['dxfViewer.moreViewers', 'dxfViewer.openWalkthrough', 'dxfViewer.openWith', 'dxfViewer.supportDeveloper']);
   const pkg = require('../package.json');
-  assert.equal(pkg.name, 'dxf-viewer'); assert.equal(pkg.publisher, 'zovo'); assert.equal(pkg.version, '0.1.0'); assert.equal(`${pkg.publisher}.${pkg.name}`, ext.EXT_ID);
+  assert.equal(pkg.name, 'dxf-viewer'); assert.equal(pkg.publisher, 'zovo'); assert.equal(pkg.version, '0.1.1'); assert.equal(`${pkg.publisher}.${pkg.name}`, ext.EXT_ID);
   assert.ok(pkg.displayName.length <= 45 && pkg.displayName.toLowerCase().startsWith('dxf viewer'));
   assert.ok(pkg.keywords.length <= 30);
   assert.deepEqual(pkg.contributes.customEditors.map((e) => [e.viewType, e.selector[0].filenamePattern, e.priority]), [['dxfViewer.preview', '*.dxf', 'default'], ['dxfViewer.dwgNotice', '*.dwg', 'default']]);
@@ -153,4 +153,29 @@ test('rendered counts once per tab, copy works, unknown messages are dropped, no
 test('worker timeout stops the job with a message', async () => {
   const job = ext.parseInWorker(path.join(root, 'dist', 'worker.js'), new Uint8Array(Buffer.from('0\nEOF\n')), { timeoutMs: 1 });
   await assert.rejects(job.promise, /longer than 0 seconds|stopped/);
+});
+
+// ---------- support links (Sponsor, More free viewers) ----------
+test('support: package.json has the sponsor field, the two commands and the setting', () => {
+  const pkg = require('../package.json');
+  const support = require('../src/support');
+  assert.equal(pkg.sponsor.url, 'https://github.com/sponsors/theluckystrike');
+  assert.equal(pkg.sponsor.url, support.sponsorUrl());
+  const ids = pkg.contributes.commands.map((c) => c.command);
+  assert.ok(ids.includes('dxfViewer.supportDeveloper') && ids.includes('dxfViewer.moreViewers'));
+  assert.equal(pkg.contributes.configuration.properties['dxfViewer.showSupportLinks'].default, true);
+  assert.ok(support.otherProducts(ext.EXT_ID).every((p) => p.id !== ext.EXT_ID));
+});
+
+test('support: the footer shows by default and dxfViewer.showSupportLinks=false hides it', async () => {
+  for (const [value, shown] of [[undefined, true], [false, false]]) {
+    if (value === undefined) delete state.config.showSupportLinks; else state.config.showSupportLinks = value;
+    try {
+      const f = await open(floor);
+      assert.equal(/id="zovo-support"/.test(f.panel.webview.html), shown, String(value));
+      assert.equal(f.panel.webview.html.includes('command:dxfViewer.moreViewers'), shown);
+      assert.deepEqual(f.panel.webview.options.enableCommandUris, ['dxfViewer.supportDeveloper', 'dxfViewer.moreViewers', 'workbench.action.openSettings']);
+      f.close();
+    } finally { delete state.config.showSupportLinks; }
+  }
 });
