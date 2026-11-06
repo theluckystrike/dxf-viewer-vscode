@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2 (2026-11-07)
+
+- The "More free viewers" list and the README list now show the 15 Zovo extensions on the Marketplace under their current names, and 12 that are coming soon.
+- Extensions for related files now come first in each group.
+
 ## 0.1.1 (2026-11-06)
 
 - The bar under the drawing ends with two small links, "Sponsor" (GitHub Sponsors) and "More free viewers". The new setting `dxfViewer.showSupportLinks` (default `true`) hides them, and so does the "Hide" link next to them. There is no popup, and nothing is sent anywhere.
