@@ -1,0 +1,198 @@
+{
+  "name": "dxf-viewer",
+  "displayName": "DXF Viewer & CAD Viewer for 2D Drawings",
+  "description": "DXF viewer and CAD viewer that opens ASCII and binary .dxf drawings in VS Code with layers, pan, zoom, measure, blocks, text, dimensions and PNG or SVG export.",
+  "version": "0.1.0",
+  "publisher": "zovo",
+  "license": "MIT",
+  "icon": "icon.png",
+  "galleryBanner": {
+    "color": "#14202E",
+    "theme": "dark"
+  },
+  "engines": {
+    "vscode": "^1.90.0",
+    "node": ">=18"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "dxf viewer",
+    "dxf",
+    "cad viewer",
+    "cad",
+    "autocad",
+    "dxf preview",
+    "dxf file",
+    "binary dxf",
+    "drawing viewer",
+    "2d cad",
+    "floor plan",
+    "technical drawing",
+    "engineering drawing",
+    "mechanical drawing",
+    "architecture",
+    "blueprint",
+    "layers",
+    "measure distance",
+    "dxf to svg",
+    "dxf to png",
+    "svg export",
+    "librecad",
+    "qcad",
+    "freecad",
+    "laser cutting",
+    "cnc",
+    "dwg to dxf",
+    "vector drawing",
+    "viewer",
+    "offline"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": true
+  },
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "dxfViewer.preview",
+        "displayName": "DXF Viewer",
+        "selector": [
+          {
+            "filenamePattern": "*.dxf"
+          }
+        ],
+        "priority": "default"
+      },
+      {
+        "viewType": "dxfViewer.dwgNotice",
+        "displayName": "DXF Viewer (DWG notice)",
+        "selector": [
+          {
+            "filenamePattern": "*.dwg"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
+    "commands": [
+      {
+        "command": "dxfViewer.openWalkthrough",
+        "title": "Get Started",
+        "category": "DXF Viewer"
+      },
+      {
+        "command": "dxfViewer.openWith",
+        "title": "Open in DXF Viewer",
+        "category": "DXF Viewer"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "dxfViewer.openWith",
+          "when": "resourceExtname =~ /^\\.dxf$/i",
+          "group": "navigation@9"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "dxfViewer.openWith",
+          "when": "false"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "DXF Viewer",
+      "properties": {
+        "dxfViewer.maxFileMB": {
+          "type": "number",
+          "default": 500,
+          "minimum": 1,
+          "maximum": 2048,
+          "description": "DXF files up to this size are read. Larger files show a message and are not read."
+        },
+        "dxfViewer.background": {
+          "type": "string",
+          "enum": ["auto", "dark", "light"],
+          "default": "auto",
+          "enumDescriptions": ["Follow the VS Code theme", "Dark background, like most CAD programs", "White background, like a printed sheet"],
+          "description": "Background of the drawing when a file opens. The toolbar button switches it per tab."
+        },
+        "dxfViewer.askForRating": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ask one time for a Marketplace rating after you have used DXF Viewer for a few days. You can answer \"Later\" or \"Don't ask again\". Nothing is sent anywhere."
+        }
+      }
+    },
+    "walkthroughs": [
+      {
+        "id": "dxfViewer.start",
+        "title": "Get started with DXF Viewer",
+        "description": "Open DXF drawings in VS Code, check layers and measure distances.",
+        "steps": [
+          {
+            "id": "open",
+            "title": "Open a DXF file",
+            "description": "Click a .dxf file in the Explorer. ASCII and binary DXF both open.\n[Find a DXF file](command:workbench.action.quickOpen?%5B%22.dxf%22%5D)",
+            "media": {
+              "image": "images/floor-plan.png",
+              "altText": "A floor plan in DXF Viewer with the layers panel, entity counts and the drawing."
+            },
+            "completionEvents": [
+              "onCommand:workbench.action.quickOpen"
+            ]
+          },
+          {
+            "id": "navigate",
+            "title": "Pan, zoom, layers and measure",
+            "description": "Drag to pan, scroll to zoom, press F to fit. Untick a layer to hide it. Press M and click two points to measure.",
+            "media": {
+              "markdown": "walkthrough/navigate.md"
+            }
+          },
+          {
+            "id": "export",
+            "title": "Export the view",
+            "description": "Save what you see as a PNG image or an SVG file for docs, tickets and pull requests.",
+            "media": {
+              "markdown": "walkthrough/export.md"
+            }
+          },
+          {
+            "id": "dwg",
+            "title": "DWG files",
+            "description": "DWG is not supported. Save the drawing as DXF in your CAD program, then open it here.",
+            "media": {
+              "markdown": "walkthrough/dwg.md"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "scripts": {
+    "build": "node scripts/build.js --production",
+    "test": "node scripts/build.js --production && node --test \"test/*.test.js\"",
+    "samples": "node scripts/make-samples.js samples",
+    "package": "npm run build && npx -y @vscode/vsce package --no-dependencies -o dist/"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  },
+  "homepage": "https://github.com/theluckystrike/dxf-viewer-vscode#readme",
+  "bugs": {
+    "url": "https://github.com/theluckystrike/dxf-viewer-vscode/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/theluckystrike/dxf-viewer-vscode"
+  }
+}

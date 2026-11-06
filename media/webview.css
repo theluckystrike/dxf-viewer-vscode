@@ -1,0 +1,50 @@
+:root { --gap: 8px; --mono: var(--vscode-editor-font-family, Menlo, monospace); --risk: #e5484d; --line: var(--vscode-panel-border, #8884); }
+html, body { height: 100%; }
+body { padding: 0; margin: 0; color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size, 13px); overflow: hidden; }
+#app { height: 100vh; display: flex; flex-direction: column; }
+.loading, .meta { color: var(--vscode-descriptionForeground); }
+.loading { padding: 16px; }
+.head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--gap); padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.title { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.fname { font-size: 1.15em; font-weight: 600; }
+.tools { display: flex; gap: 4px; flex-wrap: wrap; }
+button { font: inherit; color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); border: 1px solid transparent; border-radius: 3px; padding: 3px 10px; cursor: pointer; flex-shrink: 0; }
+button:hover { background: var(--vscode-button-secondaryHoverBackground); }
+button.on { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+button:focus-visible, canvas:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.main { flex: 1; display: flex; min-height: 0; }
+.side { width: 270px; flex-shrink: 0; overflow-y: auto; border-right: 1px solid var(--line); padding: 4px 10px 16px; }
+.side[hidden] { display: none; }
+.side h3 { display: flex; align-items: center; gap: 4px; font-size: .85em; text-transform: uppercase; letter-spacing: .04em; color: var(--vscode-descriptionForeground); margin: 12px 0 6px; }
+.side h3 button { padding: 0 6px; font-size: .95em; text-transform: none; letter-spacing: 0; }
+.spacer { flex: 1; }
+.layer { display: flex; align-items: center; gap: 6px; padding: 2px 0; cursor: pointer; white-space: nowrap; }
+.layer input { margin: 0; }
+.swatch { width: 11px; height: 11px; border-radius: 2px; border: 1px solid #8888; flex-shrink: 0; }
+.lname { overflow: hidden; text-overflow: ellipsis; }
+.ltag { color: var(--vscode-descriptionForeground); font-size: .85em; }
+.lcount { margin-left: auto; color: var(--vscode-descriptionForeground); font-variant-numeric: tabular-nums; }
+table.ents { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+table.ents th, table.ents td { text-align: left; padding: 2px 4px; border-bottom: 1px solid var(--line); }
+table.ents .num { text-align: right; }
+table.ents tfoot td { font-weight: 600; border-bottom: none; }
+dl.info { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; }
+dl.info dt { color: var(--vscode-descriptionForeground); }
+dl.info dd { margin: 0; overflow-wrap: anywhere; }
+.notes p { margin: 10px 0 0; color: var(--vscode-descriptionForeground); font-size: .92em; }
+.canvaswrap { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
+canvas.cad { flex: 1; width: 100%; min-height: 0; display: block; cursor: grab; touch-action: none; }
+canvas.cad.dragging { cursor: grabbing; }
+canvas.cad.measuring { cursor: crosshair; }
+.bar { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; padding: 4px 10px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: var(--vscode-editor-font-size, 12px); min-height: 22px; }
+.status { color: var(--vscode-descriptionForeground); }
+.measure { color: var(--vscode-textLink-foreground); font-weight: 600; }
+.measure[hidden] + button { display: none; }
+.bar button { padding: 0 8px; }
+.toast { position: fixed; right: 14px; bottom: 40px; max-width: 70%; padding: 8px 12px; border-radius: 4px; background: var(--vscode-notifications-background, #333); color: var(--vscode-notifications-foreground, #fff); border: 1px solid var(--line); box-shadow: 0 2px 8px #0006; overflow-wrap: anywhere; }
+.toast[hidden] { display: none; }
+.notice { margin: 16px; border-radius: 4px; padding: 14px 18px; border: 1px solid var(--line); max-width: 760px; overflow-y: auto; }
+.notice.err { border-color: var(--risk); }
+.notice.big { font-size: 1.1em; }
+.notice.dwg h2 { margin-top: 0; }
+.notice li { margin: 4px 0; }

@@ -1,0 +1,29 @@
+{
+ "counts": {
+  "ARC": 1,
+  "CIRCLE": 1,
+  "DIMENSION": 1,
+  "ELLIPSE": 1,
+  "HATCH": 1,
+  "INSERT": 3,
+  "LINE": 1,
+  "LWPOLYLINE": 2,
+  "MTEXT": 1,
+  "POINT": 1,
+  "SPLINE": 1,
+  "TEXT": 1
+ },
+ "ezdxf": "1.4.2",
+ "files": {
+  "ezdxf-r2018-binary.dxf": 49403,
+  "ezdxf-r2018.dxf": 59180
+ },
+ "layers": [
+  "0",
+  "DOORS",
+  "Defpoints",
+  "HIDDEN-OFF",
+  "NOTES",
+  "WALLS"
+ ]
+}
