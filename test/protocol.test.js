@@ -49,7 +49,9 @@ test('export names never point at the drawing', () => {
 });
 
 test('HTML: strict CSP, nonce script, escaped title', () => {
-  const h = buildHtml({ cspSource: 'https://x', scriptUri: 'https://x/w.js', styleUri: 'https://x/s.css', title: '<img src=x onerror=alert(1)>.dxf', nonce: 'abc' });
+  // The footer's Rate link is a click-only link to the Marketplace review page, not a loaded resource.
+  const rateLink = / href=\"https:\/\/marketplace\.visualstudio\.com\/items\?itemName=[^\"]+#review-details\"/g;
+  const h = buildHtml({ cspSource: 'https://x', scriptUri: 'https://x/w.js', styleUri: 'https://x/s.css', title: '<img src=x onerror=alert(1)>.dxf', nonce: 'abc' }).replace(rateLink, '');
   assert.match(h, /default-src 'none'/);
   assert.match(h, /script-src 'nonce-abc'/);
   assert.doesNotMatch(h, /unsafe-inline|unsafe-eval|connect-src|https?:\/\/(?!x)/);
