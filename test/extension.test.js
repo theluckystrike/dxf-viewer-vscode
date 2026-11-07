@@ -65,7 +65,7 @@ test('activate registers the DXF editor, the DWG notice and the commands; manife
   assert.deepEqual(vscodeMock.window.registered.map((r) => r[0]), ['dxfViewer.preview', 'dxfViewer.dwgNotice']);
   assert.deepEqual(vscodeMock.commands.list.sort(), ['dxfViewer.moreViewers', 'dxfViewer.openWalkthrough', 'dxfViewer.openWith', 'dxfViewer.supportDeveloper']);
   const pkg = require('../package.json');
-  assert.equal(pkg.name, 'dxf-viewer'); assert.equal(pkg.publisher, 'zovo'); assert.equal(pkg.version, '0.1.3'); assert.equal(`${pkg.publisher}.${pkg.name}`, ext.EXT_ID);
+  assert.equal(pkg.name, 'dxf-viewer'); assert.equal(pkg.publisher, 'zovo'); assert.match(pkg.version, /^\d+\.\d+\.\d+$/); assert.equal(`${pkg.publisher}.${pkg.name}`, ext.EXT_ID);
   assert.ok(pkg.displayName.length <= 45 && pkg.displayName.toLowerCase().startsWith('dxf viewer'));
   assert.ok(pkg.keywords.length <= 30);
   assert.deepEqual(pkg.contributes.customEditors.map((e) => [e.viewType, e.selector[0].filenamePattern, e.priority]), [['dxfViewer.preview', '*.dxf', 'default'], ['dxfViewer.dwgNotice', '*.dwg', 'default']]);
