@@ -32,6 +32,8 @@ Open `.dxf` drawings in VS Code and check sheets, layers, sizes and distances wi
 | Background | Dark like most CAD programs, or white like a printed sheet (B) |
 | Export | Export PNG saves the view at twice the screen resolution. Export SVG saves the visible layers as paths and text |
 
+![DXF Viewer showing a floor plan in model space with the layers panel, entity counts and the drawing](images/floor-plan.png)
+
 ![Find text: the tag V-7, a block attribute, found and framed in the floor plan](images/find.png)
 
 ![Measuring the outer wall of the sample floor plan](images/measure.png)
