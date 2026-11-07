@@ -24,7 +24,13 @@ const vscodeMock = {
       writeFile: async (u, b) => { state.writes.push([u.fsPath, b.length]); fs.writeFileSync(u.fsPath, b); },
     },
     isTrusted: true,
+    watchers: [],
+    createFileSystemWatcher(pattern) {
+      const w = { pattern, change: [], create: [], disposed: false, onDidChange(h) { this.change.push(h); }, onDidCreate(h) { this.create.push(h); }, dispose() { this.disposed = true; } };
+      this.watchers.push(w); return w;
+    },
   },
+  RelativePattern: class { constructor(base, pattern) { this.base = base; this.pattern = pattern; } },
   window: {
     registered: [], state: { focused: true },
     registerCustomEditorProvider(id, p, o) { this.registered.push([id, p, o]); return { dispose() {} }; },
@@ -178,4 +184,26 @@ test('support: the footer shows by default and dxfViewer.showSupportLinks=false 
       f.close();
     } finally { delete state.config.showSupportLinks; }
   }
+});
+
+test('live reload: a change on disk reads the file again and posts the model with reload set; the watcher goes with the panel', async () => {
+  const f = await open(floor);
+  const w = vscodeMock.workspace.watchers[vscodeMock.workspace.watchers.length - 1];
+  assert.equal(w.pattern.pattern, 'floor-plan.dxf'); assert.equal(path.basename(w.pattern.base.path), path.basename(path.dirname(floor)));
+  await f.send({ type: 'ready' });
+  const before = f.sent.filter((x) => x.type === 'model').length;
+  w.change.forEach((h) => h()); w.change.forEach((h) => h()); // two quick saves give one read
+  await new Promise((r) => setTimeout(r, 1500));
+  const models = f.sent.filter((x) => x.type === 'model');
+  assert.equal(models.length, before + 1); assert.equal(models[models.length - 1].reload, true);
+  f.close(); assert.equal(w.disposed, true);
+  w.change.forEach((h) => h()); await new Promise((r) => setTimeout(r, 600));
+  assert.equal(f.sent.filter((x) => x.type === 'model').length, before + 1, 'nothing after dispose');
+});
+
+test('live reload: dxfViewer.liveReload=false sets no watcher, and DWG pages never get one', async () => {
+  const n = vscodeMock.workspace.watchers.length;
+  state.config.liveReload = false; await open(floor); delete state.config.liveReload;
+  await open(dwg, 'dwg');
+  assert.equal(vscodeMock.workspace.watchers.length, n);
 });

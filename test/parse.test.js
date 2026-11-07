@@ -62,7 +62,9 @@ test('floor plan: layers, off/frozen flags, blocks, nested inserts, arrays, dime
   assert.equal(m.prims.filter((p) => p.t === 'I' && /^\*D/.test(m.blocks[p.bi].name)).length, 4);
   assert.ok(m.prims.some((p) => p.t === 'T' && p.s === '14000'));
   const hatches = m.prims.filter((p) => p.t === 'F' && 'pat' in p);
-  assert.equal(hatches.length, 4); assert.equal(hatches[0].holes.length, 1); assert.equal(hatches.filter((h) => h.pat).length, 1);
+  assert.equal(hatches.length, 3); assert.equal(hatches[0].holes.length, 1); assert.equal(hatches.filter((h) => h.pat).length, 0);
+  assert.equal(m.prims.filter((p) => p.t === 'S').length, 1, 'the pattern hatch is drawn as its pattern lines');
+  assert.deepEqual(m.hatch, { patterns: 1, tinted: 0, segments: m.hatch.segments }); assert.ok(m.hatch.segments > 10);
   assert.ok(m.prims.some((p) => p.t === 'T' && p.s === 'LIVING / DINING\n31.2 m²'));
   assert.deepEqual([m.extents[0], m.extents[2], m.extents[3]].map(Math.round), [-1200, 15200, 11000]);
   assert.ok(m.extents[1] < -3200 && m.extents[1] > -3400);

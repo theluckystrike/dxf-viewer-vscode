@@ -176,6 +176,74 @@ try {
     if (p.notice !== 'error' || !/could not be read\. Line 1 should hold a group code/.test(t)) throw new Error(t);
     return { notice: t };
   });
+  // ---- 0.2.0: sheets, pattern hatches, Find text, live reload (house-sheets.dxf from scripts/make_sheet_sample.py) ----
+  const pickSheet = async (i) => { await E(`(() => { const s = document.querySelector('select[data-act="sheet"]'); s.value = '${i}'; s.dispatchEvent(new Event('change')); })()`); await sleep(500); return probe(); };
+  if (fs.existsSync(path.join(ws, 'house-sheets.dxf'))) {
+    await step('house-sheets.dxf: model space with three pattern hatches drawn as lines; Sheet list has the two layouts', async () => {
+      await open('house-sheets.dxf'); const p = await loaded();
+      const opts = await E(`[...document.querySelectorAll('select[data-act="sheet"] option')].map(o => o.textContent).join('|')`);
+      const px = await painted();
+      const b = await canvasBox(); const [hx, hy] = await worldToPage(7900, 2500);
+      for (let i = 0; i < 3; i++) { await mouse('mouseWheel', hx, hy, { deltaX: 0, deltaY: -240 }); await sleep(80); }
+      await sleep(300); await shot('hatch-zoom');
+      await vs.wvClick(wv, btn('fit')); await sleep(300);
+      if (p.hatch.patterns !== 3 || p.hatch.tinted !== 0 || opts !== 'Model|A-101 Ground floor|A-501 Bath detail' || px < 2000) throw new Error(JSON.stringify({ hatch: p.hatch, opts, px }));
+      return { hatch: p.hatch, sheetOptions: opts, paintedSamples: px, box: b };
+    });
+    await step('Sheet A-101: paper, title block and the 1:100 viewport are painted', async () => {
+      const p = await pickSheet(0); const px = await painted();
+      const vp = await worldToPage(150, 160); // viewport centre, model point (7000, 4300)
+      await shot('sheet-a101');
+      const notes = await text('.notes');
+      if (p.sheet !== 0 || px < 1500 || !/2 paper space sheets with 3 viewports/.test(notes)) throw new Error(JSON.stringify({ sheet: p.sheet, px, notes }));
+      return { sheet: p.sheets[p.sheet], paintedSamples: px, notes, viewportCentreOnPage: vp };
+    });
+    await step('Sheet A-501: FURNITURE frozen in the detail viewport only, key plan viewport shows it', async () => {
+      const p = await pickSheet(1); const px = await painted();
+      await shot('sheet-a501');
+      if (p.sheet !== 1 || px < 1500) throw new Error(JSON.stringify({ sheet: p.sheet, px }));
+      return { sheet: p.sheets[p.sheet], paintedSamples: px };
+    });
+    await step('Export SVG of the sheet: clip paths for the viewports and the title block text', async () => {
+      const target = path.join(ws, 'export-sheet.svg'); fs.rmSync(target, { force: true });
+      await pickSheet(0);
+      await vs.wvClick(wv, btn('svg')); await saveVia(target);
+      const ok = await vs.waitFor(() => fs.existsSync(target) && fs.statSync(target).size > 1000, 10000);
+      if (!ok) throw new Error('svg not written');
+      const svg = fs.readFileSync(target, 'utf8'); fs.rmSync(target);
+      const clips = (svg.match(/<clipPath /g) || []).length;
+      if (clips !== 1 || !/GROUND FLOOR PLAN/.test(svg) || !/LIVING \/ DINING/.test(svg)) throw new Error(svg.slice(0, 300));
+      return { bytes: svg.length, clipPaths: clips };
+    });
+    await step('Find: Cmd+F focuses the box, "V-7" finds the block attribute and frames it; Enter cycles', async () => {
+      await pickSheet(-1); await sleep(4200); // let the export toast close before the picture
+      await vs.wvClick(wv, `document.querySelector('canvas.cad')`); await sleep(200);
+      await vs.key('f', 'KeyF', 4, 70); await sleep(300);
+      const focused = await E(`document.activeElement && document.activeElement.className`);
+      await vs.type('V-7'); await sleep(500);
+      const p = await probe(); const count = await text('.findcount');
+      await shot('find-v7');
+      await vs.key('Enter', 'Enter', 0, 13); await sleep(300); const p2 = await probe();
+      await E(`(() => { const i = document.querySelector('input.find'); i.select(); })()`); await vs.type('zzz-none'); await sleep(300);
+      const none = await text('.findcount');
+      await vs.key('Escape', 'Escape', 0, 27); await sleep(200);
+      if (focused !== 'find' || p.find.hits !== 1 || p.find.hit !== 'V-7' || count !== '1 of 1' || p2.find.i !== 0 || none !== 'No match' || Math.abs(p.view.cx - 6400) > 400) throw new Error(JSON.stringify({ focused, find: p.find, count, none, view: p.view }));
+      return { focused, find: p.find, count, view: p.view, noMatch: none };
+    });
+    await step('Live reload: the file changes on disk, the view reads it again and keeps the sheet', async () => {
+      const f = path.join(ws, 'house-sheets.dxf'); const orig = fs.readFileSync(f);
+      await pickSheet(1); const before = await probe();
+      fs.writeFileSync(f, orig.toString('latin1').replace('PUMP P-1 (UNDER SINK)', 'PUMP P-2 (UNDER SINK)'), 'latin1');
+      const p = await vs.waitFor(async () => { const q = await probe(); return q.reloads >= 1 ? q : null; }, 10000, 200);
+      const toastText = await text('.toast');
+      await pickSheet(-1);
+      await E(`(() => { const i = document.querySelector('input.find'); i.value = 'P-2'; i.dispatchEvent(new Event('input')); })()`); await sleep(300);
+      const hit = await probe();
+      fs.writeFileSync(f, orig); await vs.waitFor(async () => (await probe()).reloads >= 2, 10000, 200);
+      if (!p || p.sheet !== before.sheet || hit.find.hits !== 1 || !/changed on disk/.test(toastText)) throw new Error(JSON.stringify({ p, toastText, hit: hit.find }));
+      return { reloads: p.reloads, keptSheet: p.sheets[p.sheet], toast: toastText, newTextFound: hit.find.hit };
+    });
+  }
   await step('Default Light Modern theme: auto background follows the theme', async () => {
     const sf = path.join(vs.ud, 'User', 'settings.json');
     const set = (theme) => { const j = JSON.parse(fs.readFileSync(sf, 'utf8')); j['workbench.colorTheme'] = theme; fs.writeFileSync(sf, JSON.stringify(j, null, 1)); };

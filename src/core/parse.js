@@ -6,7 +6,7 @@ const { createReader, sniff, DxfError } = require('./reader');
 const { aciToRgb } = require('./aci');
 const { cleanText, cleanMText } = require('./text');
 
-const LIMITS = { prims: 1500000, snap: 100000, depth: 16, splineSeg: 400 };
+const LIMITS = { prims: 1500000, snap: 100000, depth: 16, splineSeg: 400, texts: 50000, hatchLines: 4000, hatchSegs: 60000, hatchTotal: 600000 };
 const UNITS = ['', 'in', 'ft', 'mi', 'mm', 'cm', 'm', 'km', 'µin', 'mil', 'yd', 'Å', 'nm', 'µm', 'dm', 'dam', 'hm', 'Gm', 'AU', 'ly', 'pc', 'US ft', 'US in', 'US yd', 'US mi'];
 const VERSIONS = { AC1006: 'R10', AC1009: 'R11/R12', AC1012: 'R13', AC1014: 'R14', AC1015: 'AutoCAD 2000', AC1018: 'AutoCAD 2004', AC1021: 'AutoCAD 2007', AC1024: 'AutoCAD 2010', AC1027: 'AutoCAD 2013', AC1032: 'AutoCAD 2018' };
 const DRAWN = new Set(['LINE', 'CIRCLE', 'ARC', 'LWPOLYLINE', 'POLYLINE', 'POINT', 'TEXT', 'MTEXT', 'INSERT', 'ELLIPSE', 'SPLINE', 'SOLID', 'TRACE', '3DFACE', 'HATCH', 'DIMENSION', 'LEADER', 'ATTRIB', 'RAY', 'XLINE', 'ACAD_TABLE']);
@@ -93,6 +93,9 @@ class Parser {
     this.paperSpace = 0; this.invisible = 0; this.primTotal = 0; this.truncated = false;
     this.warnings = [];
     this.sections = [];
+    // paper space: entities flagged 67=1 in ENTITIES, *Paper_Space* blocks, LAYOUT objects, block records
+    this.psPrims = []; this.psCounts = Object.create(null); this.psBlocks = new Map(); this.layoutObjs = []; this.brecName = new Map(); this.layerByHandle = new Map();
+    this.hatchSegs = 0; this.hatchPatterns = 0; this.hatchTinted = 0;
     this.layer('0');
   }
 
@@ -147,6 +150,7 @@ class Parser {
       else if (name === 'TABLES') this.tablesSection();
       else if (name === 'BLOCKS') this.blocksSection();
       else if (name === 'ENTITIES') this.entitySection(this.prims, this.counts, true);
+      else if (name === 'OBJECTS') this.objectsSection();
       else this.skipSection();
     }
     if (!this.sections.length) throw new DxfError('No DXF sections were found. This does not look like a DXF file.', 0);
@@ -156,6 +160,21 @@ class Parser {
   skipSection() {
     const r = this.r;
     while (r.next()) if (r.code === 0 && r.value === 'ENDSEC') return;
+  }
+
+  /** LAYOUT objects name the paper space sheets and point to their block records. */
+  objectsSection() {
+    for (;;) {
+      const e = this.readEntity();
+      if (!e || e.type === 'ENDSEC' || e.type === 'EOF') return;
+      if (e.type !== 'LAYOUT') continue;
+      const t = e.tags;
+      let k = 0; while (k < t.length && !(t[k] === 100 && t[k + 1] === 'AcDbLayout')) k += 2;
+      if (k >= t.length) continue;
+      const after = t.slice(k + 2);
+      const lim = [tagVal(after, 10, 0), tagVal(after, 20, 0), tagVal(after, 11, 0), tagVal(after, 21, 0)];
+      this.layoutObjs.push({ name: String(tagVal(after, 1, '')), tab: tagVal(after, 71, 0), brec: String(tagVal(after, 330, '')).toUpperCase(), lim });
+    }
   }
 
   headerSection() {
@@ -189,6 +208,9 @@ class Parser {
         L.on = aci >= 0; L.frozen = (flags & 1) === 1; L.lt = this.ltype(tagVal(e.tags, 6, 'CONTINUOUS'));
         if (L.lt < 0) L.lt = 0;
         L.fromTable = true;
+        const hd = tagVal(e.tags, 5, null); if (hd !== null) this.layerByHandle.set(String(hd).toUpperCase(), i);
+      } else if (table === 'BLOCK_RECORD' && e.type === 'BLOCK_RECORD') {
+        const hd = tagVal(e.tags, 5, null); if (hd !== null) this.brecName.set(String(hd).toUpperCase(), String(tagVal(e.tags, 2, '')).toUpperCase());
       } else if (table === 'LTYPE' && e.type === 'LTYPE') {
         const name = String(tagVal(e.tags, 2, ''));
         const pattern = [];
@@ -208,8 +230,10 @@ class Parser {
       const blk = { name, base: [tagVal(e.tags, 10, 0), tagVal(e.tags, 20, 0)], prims: [], flags: tagVal(e.tags, 70, 0) };
       const key = name.toUpperCase();
       const isLayout = /^\*(MODEL|PAPER)_SPACE/.test(key);
-      this.entitySection(blk.prims, this.blockCounts, false, false, 'ENDBLK');
-      if (isLayout) continue; // layout blocks hold paper space or duplicates of ENTITIES
+      const isPaper = /^\*PAPER_SPACE/.test(key);
+      this.entitySection(blk.prims, isLayout ? this.psCounts : this.blockCounts, false, false, 'ENDBLK');
+      if (isPaper && blk.prims.length) this.psBlocks.set(key, blk.prims);
+      if (isLayout) continue; // model space duplicates ENTITIES
       if (!this.blockIdx.has(key)) { this.blockIdx.set(key, this.blocks.length); this.blocks.push(blk); }
     }
   }
@@ -225,7 +249,12 @@ class Parser {
       else if (e.type === 'INSERT' && tagVal(e.tags, 66, 0) === 1) extra = this.readSequence('ATTRIB');
       if (e.type === 'SEQEND' || e.type === 'VERTEX') continue;
       if (e.type === 'ATTDEF' && !topLevel) continue; // shown by the ATTRIBs of each insert instead
-      if (tagVal(e.tags, 67, 0) === 1 && topLevel) { this.paperSpace++; continue; }
+      if (tagVal(e.tags, 67, 0) === 1 && topLevel) {
+        this.paperSpace++;
+        this.psCounts[e.type] = (this.psCounts[e.type] || 0) + 1;
+        if (tagVal(e.tags, 60, 0) !== 1) this.entity(e, extra, this.psPrims);
+        continue;
+      }
       counts[e.type] = (counts[e.type] || 0) + 1;
       if (tagVal(e.tags, 60, 0) === 1) { this.invisible++; continue; }
       const before = out.length;
@@ -396,6 +425,15 @@ class Parser {
         break;
       }
       case 'HATCH': this.hatch(t, base, out); break;
+      case 'VIEWPORT': {
+        if (g(69, 2) === 1 || g(68, 1) === 0) break; // id 1 is the sheet itself; status 0 is off
+        const frozen = [];
+        for (let k = 0; k < t.length; k += 2) if (t[k] === 331) frozen.push(String(t[k + 1]).toUpperCase());
+        const vh = g(45, 0), h = g(41, 0), w = g(40, 0);
+        if (!(vh > 0) || !(h > 0) || !(w > 0)) break;
+        this.push(out, P({ t: 'V', x: g(10, 0), y: g(20, 0), w, h, vx: g(12, 0) + g(17, 0), vy: g(22, 0) + g(27, 0), vh, tw: g(51, 0) * D2R, fh: frozen }));
+        break;
+      }
       case 'ACAD_TABLE': {
         const b = g(2, null);
         if (b) this.push(out, P({ t: 'I', b: String(b), x: 0, y: 0, sx: 1, sy: 1, r: 0, nc: 1, nr: 1, cs: 0, rs: 0, anon: 1 }));
@@ -497,6 +535,16 @@ class Parser {
     }
     if (!loops.length) return;
     const P = (o) => Object.assign(o, base);
+    if (!solid && !g(450, 0)) {
+      const lines = patternLines(t, k);
+      const segs = lines && lines.length ? hatchSegments(loops, lines, Math.min(LIMITS.hatchSegs, LIMITS.hatchTotal - this.hatchSegs)) : null;
+      if (segs && segs.length) {
+        // sp: the closest line spacing, so the view can show a tint instead when lines would be under 2 px apart
+        const sp = Math.min(...lines.map((L) => Math.abs(L.ox * -Math.sin(L.a) + L.oy * Math.cos(L.a))).filter((v) => v > 1e-12));
+        this.hatchSegs += segs.length / 4; this.hatchPatterns++; this.push(out, P({ t: 'S', p: segs, sp, b: loops })); return;
+      }
+      this.hatchTinted++;
+    }
     this.push(out, P({ t: 'F', p: loops[0], holes: loops.slice(1), pat: solid ? 0 : 1 }));
   }
 
@@ -520,7 +568,17 @@ class Parser {
     };
     resolve(this.prims);
     for (const b of blocks) resolve(b.prims);
+    const layouts = this.layouts();
+    for (const L of layouts) resolve(L.prims);
     const ex = this.extents();
+    for (const L of layouts) {
+      const e2 = this.extents(L.prims);
+      const b = e2.box ? e2.box.slice() : [Infinity, Infinity, -Infinity, -Infinity];
+      const grow = (x, y) => { if (x < b[0]) b[0] = x; if (y < b[1]) b[1] = y; if (x > b[2]) b[2] = x; if (y > b[3]) b[3] = y; };
+      for (const v of L.vps) { grow(v.x - v.w / 2, v.y - v.h / 2); grow(v.x + v.w / 2, v.y + v.h / 2); }
+      if (L.paper) { grow(L.paper[0], L.paper[1]); grow(L.paper[2], L.paper[3]); }
+      L.box = b[0] <= b[2] ? b : null; L.snap = e2.snap; L.texts = this.textIndex(L.prims);
+    }
     const H = this.header;
     const ver = String(H.$ACADVER || '');
     const insUnits = Number(H.$INSUNITS || 0);
@@ -537,6 +595,8 @@ class Parser {
       counts: this.counts, blockCounts: this.blockCounts,
       drawn: Object.keys(this.counts).concat(Object.keys(this.blockCounts)).filter((k) => DRAWN.has(k)),
       notDrawn: [...new Set(Object.keys(this.counts).concat(Object.keys(this.blockCounts)).filter((k) => !DRAWN.has(k) || k === 'RAY' || k === 'XLINE'))],
+      layouts, texts: this.textIndex(this.prims),
+      hatch: { patterns: this.hatchPatterns, tinted: this.hatchTinted, segments: this.hatchSegs },
       paperSpace: this.paperSpace, invisible: this.invisible, missingBlocks: this.missingBlocks || 0,
       truncated: this.truncated, primTotal: this.primTotal, endedEarly: !this.sawEof,
       extents: ex.box, snap: ex.snap,
@@ -544,8 +604,55 @@ class Parser {
     };
   }
 
+  /** Paper space sheets in tab order. Viewports become a separate list with the layers they freeze. */
+  layouts() {
+    const out = [];
+    const take = (name, tab, prims, lim) => {
+      const vps = [], rest = [];
+      for (const p of prims) {
+        if (p.t !== 'V') { rest.push(p); continue; }
+        p.frozen = p.fh.map((h) => this.layerByHandle.get(h)).filter((i) => i !== undefined); delete p.fh; delete p.t;
+        vps.push(p);
+      }
+      if (!rest.length && !vps.length) return;
+      const paper = lim && lim[2] - lim[0] > 0 && lim[3] - lim[1] > 0 && lim.every(Number.isFinite) ? lim : null;
+      out.push({ name, tab, prims: rest, vps, paper });
+    };
+    const used = new Set();
+    const objs = this.layoutObjs.filter((o) => o.name.toUpperCase() !== 'MODEL' && this.brecName.get(o.brec) !== '*MODEL_SPACE').sort((a, b) => a.tab - b.tab);
+    for (const o of objs) {
+      const bname = this.brecName.get(o.brec) || '';
+      if (!bname) continue; // points to a block record that is not in the file
+      let prims;
+      if (bname === '*PAPER_SPACE') prims = this.psPrims.concat(this.psBlocks.get('*PAPER_SPACE') || []);
+      else prims = this.psBlocks.get(bname) || [];
+      used.add(bname); if (bname === '*PAPER_SPACE') used.add('*ENTITIES');
+      take(o.name || `Sheet ${out.length + 1}`, o.tab, prims, o.lim);
+    }
+    if (!used.has('*ENTITIES') && this.psPrims.length) take(objs.length ? 'Paper space' : 'Sheet 1', -1, this.psPrims, null);
+    for (const [key, prims] of this.psBlocks) if (!used.has(key) && key !== '*PAPER_SPACE') take(`Sheet ${out.length + 1}`, 1e6, prims, null);
+    return out;
+  }
+
+  /** Text strings with their world position, for Find. Layer 0 inside a block takes the insert's layer. */
+  textIndex(prims) {
+    const blocks = this.blocks, out = [];
+    const walk = (list, m, inhLayer, depth) => {
+      for (const p of list) {
+        if (out.length >= LIMITS.texts) return;
+        const L = inhLayer !== null && p.l === 0 ? inhLayer : p.l;
+        if (p.t === 'T') {
+          const x = m[0] * p.x + m[2] * p.y + m[4], y = m[1] * p.x + m[3] * p.y + m[5], sc = Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2])) || 1;
+          out.push({ s: p.s, x, y, h: p.h * sc, r: (p.r || 0) + Math.atan2(m[1], m[0]), ha: p.ha, va: p.va, l: L, w: p.w ? p.w * sc : 0 });
+        } else if (p.t === 'I' && p.bi >= 0 && depth < 8) for (const im of insertMatrices(p)) walk(blocks[p.bi].prims, mul(m, im), L, depth + 1);
+      }
+    };
+    walk(prims, [1, 0, 0, 1, 0, 0], null, 0);
+    return out;
+  }
+
   /** World extents and snap points, walking inserts through their transforms. */
-  extents() {
+  extents(top) {
     const blocks = this.blocks;
     const memo = new Map();
     const snap = [];
@@ -553,7 +660,7 @@ class Parser {
       const b = [Infinity, Infinity, -Infinity, -Infinity];
       const add = (x, y) => { if (!Number.isFinite(x) || !Number.isFinite(y)) return; if (x < b[0]) b[0] = x; if (y < b[1]) b[1] = y; if (x > b[2]) b[2] = x; if (y > b[3]) b[3] = y; };
       for (const p of prims) {
-        if (p.t === 'L' || p.t === 'F') for (let i = 0; i < p.p.length; i += 2) add(p.p[i], p.p[i + 1]);
+        if (p.t === 'L' || p.t === 'F' || p.t === 'S') for (let i = 0; i < p.p.length; i += 2) add(p.p[i], p.p[i + 1]);
         else if (p.t === 'A') arcBox(p, add);
         else if (p.t === 'P') add(p.x, p.y);
         else if (p.t === 'T') textBox(p, add);
@@ -573,7 +680,7 @@ class Parser {
       memo.set(bi, bb);
       return bb;
     };
-    const box = boxOf(this.prims, 0, new Set());
+    const box = boxOf(top || this.prims, 0, new Set());
     // snap points: vertices, arc ends and centres, insert points, through block transforms
     const walk = (prims, m, depth) => {
       for (const p of prims) {
@@ -585,9 +692,87 @@ class Parser {
         else if (p.t === 'I' && p.bi >= 0 && depth < 6) { for (const im of insertMatrices(p)) walk(blocks[p.bi].prims, mul(m, im), depth + 1); }
       }
     };
-    walk(this.prims, [1, 0, 0, 1, 0, 0], 0);
+    walk(top || this.prims, [1, 0, 0, 1, 0, 0], 0);
     return { box: box[0] <= box[2] ? box : null, snap };
   }
+}
+
+/** Pattern line families of a HATCH, read after the boundary loops (codes 53 43 44 45 46 79 49, already in world scale and angle). */
+function patternLines(t, k) {
+  while (k < t.length && t[k] !== 78) k += 2;
+  if (k >= t.length) return null;
+  const n = t[k + 1]; k += 2;
+  const lines = [];
+  for (let i = 0; i < n; i++) {
+    while (k < t.length && t[k] !== 53) k += 2;
+    if (k >= t.length) break;
+    const L = { a: t[k + 1] * D2R, bx: 0, by: 0, ox: 0, oy: 0, d: [] }; k += 2;
+    let nd = 0;
+    while (k < t.length && t[k] !== 53 && t[k] !== 47 && t[k] !== 98) {
+      const c = t[k], v = t[k + 1]; k += 2;
+      if (c === 43) L.bx = v; else if (c === 44) L.by = v; else if (c === 45) L.ox = v; else if (c === 46) L.oy = v;
+      else if (c === 79) nd = v; else if (c === 49 && L.d.length < nd) L.d.push(v);
+    }
+    lines.push(L);
+  }
+  return lines;
+}
+
+/**
+ * Clips each pattern line family to the boundary loops (even-odd, so islands stay empty) and cuts the dashes.
+ * Returns flat segments [x1, y1, x2, y2, ...], or null when the pattern is too dense to draw as lines.
+ */
+function hatchSegments(loops, lines, maxSegs) {
+  const out = [];
+  for (const L of lines) {
+    const ux = Math.cos(L.a), uy = Math.sin(L.a), nx = -uy, ny = ux;
+    const step = L.ox * nx + L.oy * ny;
+    if (!(Math.abs(step) > 1e-12)) continue;
+    let pmin = Infinity, pmax = -Infinity;
+    for (const lp of loops) for (let i = 0; i < lp.length; i += 2) { const q = (lp[i] - L.bx) * nx + (lp[i + 1] - L.by) * ny; if (q < pmin) pmin = q; if (q > pmax) pmax = q; }
+    let i0 = Math.ceil(Math.min(pmin / step, pmax / step)), i1 = Math.floor(Math.max(pmin / step, pmax / step));
+    if (i1 - i0 > LIMITS.hatchLines) return null;
+    const period = L.d.reduce((a, b) => a + Math.abs(b), 0);
+    if (L.d.length && !(period > 0)) continue;
+    for (let i = i0; i <= i1; i++) {
+      const Ox = L.bx + i * L.ox, Oy = L.by + i * L.oy;
+      const ts = [];
+      for (const lp of loops) {
+        const n = lp.length / 2;
+        for (let j = 0; j < n; j++) {
+          const ax = lp[2 * j], ay = lp[2 * j + 1], bx = lp[(2 * j + 2) % lp.length], by = lp[(2 * j + 3) % lp.length];
+          const da = (ax - Ox) * nx + (ay - Oy) * ny, db = (bx - Ox) * nx + (by - Oy) * ny;
+          if ((da > 0) === (db > 0)) continue;
+          const f = da / (da - db);
+          ts.push((ax - Ox) * ux + (ay - Oy) * uy + f * ((bx - ax) * ux + (by - ay) * uy));
+        }
+      }
+      ts.sort((a, b) => a - b);
+      for (let j = 0; j + 1 < ts.length; j += 2) {
+        const t0 = ts[j], t1 = ts[j + 1];
+        if (t1 - t0 < 1e-12) continue;
+        const seg = (a, b) => { out.push(Ox + ux * a, Oy + uy * a, Ox + ux * b, Oy + uy * b); };
+        if (!L.d.length) seg(t0, t1);
+        else {
+          // the dash pattern starts at each line's own origin (base + i x offset), which already carries the shift along the line
+          let pos = Math.floor(t0 / period) * period;
+          let guard = 0;
+          while (pos < t1 && guard++ < 100000) {
+            for (const dl of L.d) {
+              const len = Math.abs(dl);
+              if (dl > 0) { const a = Math.max(pos, t0), b = Math.min(pos + len, t1); if (b > a) seg(a, b); }
+              else if (dl === 0 && pos >= t0 && pos <= t1) seg(pos, pos);
+              pos += len;
+              if (pos >= t1) break;
+            }
+            if (out.length / 4 > maxSegs) return null;
+          }
+        }
+        if (out.length / 4 > maxSegs) return null;
+      }
+    }
+  }
+  return out;
 }
 
 function arrowHead(x, y, fromX, fromY, size) {
@@ -654,4 +839,4 @@ function parseDxf(bytes, opts) {
   return new Parser(bytes, opts).parse();
 }
 
-module.exports = { parseDxf, Parser, bulgePoints, splinePoints, insertMatrices, mul, tagVal, colorSpec, fmtNum, LIMITS, UNITS };
+module.exports = { parseDxf, Parser, bulgePoints, splinePoints, insertMatrices, mul, tagVal, colorSpec, fmtNum, hatchSegments, patternLines, LIMITS, UNITS };

@@ -1,5 +1,6 @@
 // DXF Viewer webview: draws the parsed model on a 2D canvas. All file text goes in with textContent or fillText.
 /* global acquireVsCodeApi */
+const { vpMatrix, findTexts, hitBox } = require('../core/view');
 const vscode = acquireVsCodeApi();
 const app = document.getElementById('app');
 // The host renders the Sponsor and More free viewers line outside #app (or leaves it out when the setting hides it).
@@ -10,7 +11,9 @@ const S = {
   model: null, name: '', sizeText: '', ms: 0,
   view: { cx: 0, cy: 0, s: 1 }, bg: 'dark', hidden: new Set(), measure: false, mpts: [], hover: null, snapPt: null,
   loaded: false, drawMs: 0, draws: 0, rendered: false, cache: new Map(), panel: true, lastExport: null,
+  sheet: -1, frozen: null, find: { q: '', hits: [], i: -1 }, reloads: 0,
 };
+let findCount = null, findInput = null, sheetSel = null;
 let canvas, ctx, statusEl, measureEl, layersEl, wrapEl;
 
 function el(tag, attrs, ...kids) {
@@ -43,11 +46,14 @@ function resolveColor(c, li, inh) {
 }
 
 // ---------- geometry cache: one set of Path2D batches per container (top level = -1, blocks by index) ----------
+// Containers: -1 model space, 0.. blocks, 'P0'.. paper space sheets.
+function primsOf(ci) { return typeof ci === 'string' ? S.model.layouts[Number(ci.slice(1))].prims : ci < 0 ? S.model.prims : S.model.blocks[ci].prims; }
+const isHidden = (L) => S.hidden.has(L) || (S.frozen !== null && S.frozen.has(L));
 function container(ci) {
   let c = S.cache.get(ci);
   if (c) return c;
-  const prims = ci < 0 ? S.model.prims : S.model.blocks[ci].prims;
-  c = { strokes: new Map(), fills: new Map(), texts: [], inserts: [], points: [] };
+  const prims = primsOf(ci);
+  c = { strokes: new Map(), fills: new Map(), hatches: [], texts: [], inserts: [], points: [] };
   const batch = (map, p, extra) => {
     const key = `${p.l}|${p.c}|${p.lt}|${p.lts}|${extra || ''}`;
     let b = map.get(key);
@@ -56,6 +62,12 @@ function container(ci) {
   };
   for (const p of prims) {
     if (p.t === 'L') { const path = batch(c.strokes, p).path; path.moveTo(p.p[0], p.p[1]); for (let i = 2; i < p.p.length; i += 2) path.lineTo(p.p[i], p.p[i + 1]); }
+    else if (p.t === 'S') {
+      const h = { l: p.l, c: p.c, sp: p.sp || 0, lines: new Path2D(), fill: new Path2D() };
+      for (let i = 0; i < p.p.length; i += 4) { h.lines.moveTo(p.p[i], p.p[i + 1]); h.lines.lineTo(p.p[i + 2], p.p[i + 3]); }
+      for (const loop of p.b || []) { h.fill.moveTo(loop[0], loop[1]); for (let i = 2; i < loop.length; i += 2) h.fill.lineTo(loop[i], loop[i + 1]); h.fill.closePath(); }
+      c.hatches.push(h);
+    }
     else if (p.t === 'A') { const path = batch(c.strokes, p).path; path.moveTo(p.x + p.r * Math.cos(p.a0), p.y + p.r * Math.sin(p.a0)); path.arc(p.x, p.y, p.r, p.a0, p.a1, false); }
     else if (p.t === 'F') {
       const b = batch(c.fills, p, p.pat ? 'pat' : 'solid');
@@ -97,31 +109,38 @@ function dash(lt, li, lts, k) {
 function drawContainer(g, ci, inh, k, depth) {
   const c = container(ci);
   for (const b of c.fills.values()) {
-    const L = effLayer(b.l, inh); if (S.hidden.has(L)) continue;
+    const L = effLayer(b.l, inh); if (isHidden(L)) continue;
     const col = resolveColor(b.c, L, inh);
     g.fillStyle = col;
     if (b.pat === 'pat') { g.globalAlpha = 0.22; g.fill(b.path, 'evenodd'); g.globalAlpha = 1; g.strokeStyle = col; g.lineWidth = 1 / k; g.setLineDash([]); g.stroke(b.path); }
     else g.fill(b.path, 'evenodd');
   }
+  for (const h of c.hatches) { // pattern lines; a light tint when they would sit under 2 px apart
+    const L = effLayer(h.l, inh); if (isHidden(L)) continue;
+    const col = resolveColor(h.c, L, inh);
+    g.setLineDash([]); g.lineWidth = 1 / k;
+    if (h.sp * k >= 2) { g.strokeStyle = col; g.stroke(h.lines); }
+    else { g.fillStyle = col; g.globalAlpha = 0.22; g.fill(h.fill, 'evenodd'); g.globalAlpha = 1; }
+  }
   for (const b of c.strokes.values()) {
-    const L = effLayer(b.l, inh); if (S.hidden.has(L)) continue;
+    const L = effLayer(b.l, inh); if (isHidden(L)) continue;
     g.strokeStyle = resolveColor(b.c, L, inh); g.lineWidth = 1 / k;
     g.setLineDash(dash(b.lt === -2 && inh ? inh.lt : b.lt, L, b.lts, k) || []);
     g.stroke(b.path);
   }
   g.setLineDash([]);
   for (const p of c.points) {
-    const L = effLayer(p.l, inh); if (S.hidden.has(L)) continue;
+    const L = effLayer(p.l, inh); if (isHidden(L)) continue;
     g.fillStyle = resolveColor(p.c, L, inh); g.fillRect(p.x - 1.5 / k, p.y - 1.5 / k, 3 / k, 3 / k);
   }
   for (const p of c.texts) {
-    const L = effLayer(p.l, inh); if (S.hidden.has(L)) continue;
+    const L = effLayer(p.l, inh); if (isHidden(L)) continue;
     drawText(g, p, resolveColor(p.c, L, inh), k);
   }
   if (depth >= 16) return;
   for (const p of c.inserts) {
     if (!(p.bi >= 0)) continue;
-    const L = effLayer(p.l, inh); if (S.hidden.has(L)) continue;
+    const L = effLayer(p.l, inh); if (isHidden(L)) continue;
     const sub = { layer: L, color: resolveColor(p.c, L, inh), lt: p.lt === -1 ? ((S.model.layers[L] || {}).lt || 0) : p.lt };
     for (const m of matrices(p)) {
       g.save(); g.transform(m[0], m[1], m[2], m[3], m[4], m[5]);
@@ -182,7 +201,26 @@ function render(g, W, H, dpr, view) {
   if (!S.model) return;
   viewTransform(g, W, H, dpr, view);
   g.lineJoin = 'round'; g.lineCap = 'round';
-  drawContainer(g, -1, null, view.s * dpr, 0);
+  const k = view.s * dpr;
+  const L = S.sheet >= 0 ? S.model.layouts[S.sheet] : null;
+  if (!L) { drawContainer(g, -1, null, k, 0); return; }
+  if (L.paper) { // the sheet of paper, with a thin edge
+    const [x0, y0, x1, y1] = L.paper;
+    g.fillStyle = S.bg === 'dark' ? '#262626' : '#ffffff'; g.fillRect(x0, y0, x1 - x0, y1 - y0);
+    g.strokeStyle = S.bg === 'dark' ? '#555555' : '#9a9a9a'; g.lineWidth = 1 / k; g.setLineDash([]); g.strokeRect(x0, y0, x1 - x0, y1 - y0);
+  }
+  for (const v of L.vps) {
+    g.save();
+    g.beginPath(); g.rect(v.x - v.w / 2, v.y - v.h / 2, v.w, v.h); g.clip();
+    const m = vpMatrix(v);
+    g.transform(m[0], m[1], m[2], m[3], m[4], m[5]);
+    S.frozen = new Set(v.frozen);
+    drawContainer(g, -1, null, k * (v.h / v.vh), 0);
+    S.frozen = null;
+    g.restore();
+    if (!S.hidden.has(v.l)) { g.strokeStyle = resolveColor(v.c, v.l, null); g.lineWidth = 1 / k; g.setLineDash([]); g.strokeRect(v.x - v.w / 2, v.y - v.h / 2, v.w, v.h); }
+  }
+  drawContainer(g, 'P' + S.sheet, null, k, 0);
 }
 
 let raf = 0;
@@ -207,6 +245,12 @@ function toWorld(sx, sy) { const r = canvas.getBoundingClientRect(); return [(sx
 function overlay(W, H, dpr) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const accent = '#3794ff';
+  const F = S.find;
+  if (F.i >= 0 && F.hits[F.i]) {
+    const pts = hitBox(F.hits[F.i]).map((p) => toScreen(p[0], p[1]));
+    ctx.strokeStyle = '#f5a623'; ctx.lineWidth = 2; ctx.setLineDash([]);
+    ctx.beginPath(); pts.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]))); ctx.closePath(); ctx.stroke();
+  }
   if (S.measure) {
     ctx.strokeStyle = accent; ctx.fillStyle = accent; ctx.lineWidth = 1.5;
     const pts = S.mpts.slice();
@@ -219,7 +263,7 @@ function overlay(W, H, dpr) {
 
 // ---------- view ----------
 function fit() {
-  const e = S.model && S.model.extents;
+  const e = S.model && (S.sheet >= 0 ? S.model.layouts[S.sheet].box : S.model.extents);
   const r = canvas.getBoundingClientRect();
   if (!e) { S.view = { cx: 0, cy: 0, s: 1 }; draw(); return; }
   const w = Math.max(e[2] - e[0], 1e-9), h = Math.max(e[3] - e[1], 1e-9);
@@ -237,7 +281,7 @@ function zoomAt(f, sx, sy) {
 }
 
 function nearestSnap(sx, sy) {
-  const sn = S.model.snap; let best = null, bd = 100; // 10 px radius, squared
+  const sn = S.sheet >= 0 ? S.model.layouts[S.sheet].snap : S.model.snap; let best = null, bd = 100; // 10 px radius, squared
   const r = canvas.getBoundingClientRect(), s = S.view.s;
   for (let i = 0; i < sn.length; i += 2) {
     const x = (sn[i] - S.view.cx) * s + r.width / 2, y = r.height / 2 - (sn[i + 1] - S.view.cy) * s;
@@ -292,16 +336,20 @@ function buildSvg() {
   const n = (x) => +x.toFixed(4);
   const P = (m, x, y) => [n((m[0] * x + m[2] * y + m[4] - x0) * v.s), n((y1 - (m[1] * x + m[3] * y + m[5])) * v.s)];
   const walk = (ci, m, inh, depth) => {
-    const prims = ci < 0 ? S.model.prims : S.model.blocks[ci].prims;
+    const prims = primsOf(ci);
     for (const p of prims) {
       if (count > MAX) return;
-      const L = effLayer(p.l, inh); if (S.hidden.has(L)) continue;
+      const L = effLayer(p.l, inh); if (isHidden(L)) continue;
       const col = resolveColor(p.c, L, inh);
       if (p.t === 'L' || p.t === 'F') {
         const loops = p.t === 'F' ? [p.p, ...(p.holes || [])] : [p.p];
         let d = '';
         for (const lp of loops) { for (let i = 0; i < lp.length; i += 2) { const [X, Y] = P(m, lp[i], lp[i + 1]); d += (i ? 'L' : 'M') + X + ' ' + Y; } if (p.t === 'F') d += 'Z'; }
         out.push(p.t === 'F' ? `<path d="${d}" fill="${col}" fill-rule="evenodd"${p.pat ? ' fill-opacity="0.22" stroke="' + col + '"' : ''}/>` : `<path d="${d}" stroke="${col}"/>`); count++;
+      } else if (p.t === 'S') {
+        let d = '';
+        for (let i = 0; i < p.p.length; i += 4) { const [X1, Y1] = P(m, p.p[i], p.p[i + 1]), [X2, Y2] = P(m, p.p[i + 2], p.p[i + 3]); d += `M${X1} ${Y1}L${X2} ${Y2}`; }
+        out.push(`<path d="${d}" stroke="${col}"/>`); count++;
       } else if (p.t === 'A') {
         let span = p.a1 - p.a0; while (span <= 0) span += Math.PI * 2;
         const seg = Math.max(8, Math.ceil(span / (Math.PI / 90))); let d = '';
@@ -322,8 +370,23 @@ function buildSvg() {
       }
     }
   };
-  walk(-1, [1, 0, 0, 1, 0, 0], null, 0);
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${n(W)}" height="${n(H)}" viewBox="0 0 ${n(W)} ${n(H)}">\n<title>${xmlEsc(S.name)}</title>\n<rect width="100%" height="100%" fill="${bgColor()}"/>\n<g fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" font-family="Arial, Helvetica, sans-serif">\n${out.join('\n')}\n</g>\n</svg>\n`;
+  const L = S.sheet >= 0 ? S.model.layouts[S.sheet] : null;
+  const defs = [];
+  if (!L) walk(-1, [1, 0, 0, 1, 0, 0], null, 0);
+  else {
+    const I = [1, 0, 0, 1, 0, 0];
+    if (L.paper) { const [a, b] = [P(I, L.paper[0], L.paper[3]), P(I, L.paper[2], L.paper[1])]; out.push(`<rect x="${a[0]}" y="${a[1]}" width="${n(b[0] - a[0])}" height="${n(b[1] - a[1])}" fill="${S.bg === 'dark' ? '#262626' : '#ffffff'}" stroke="#9a9a9a"/>`); }
+    L.vps.forEach((v, i) => {
+      const [a, b] = [P(I, v.x - v.w / 2, v.y + v.h / 2), P(I, v.x + v.w / 2, v.y - v.h / 2)];
+      defs.push(`<clipPath id="vp${i}"><rect x="${a[0]}" y="${a[1]}" width="${n(b[0] - a[0])}" height="${n(b[1] - a[1])}"/></clipPath>`);
+      out.push(`<g clip-path="url(#vp${i})">`);
+      S.frozen = new Set(v.frozen); walk(-1, vpMatrix(v), null, 0); S.frozen = null;
+      out.push('</g>');
+      if (!S.hidden.has(v.l)) out.push(`<rect x="${a[0]}" y="${a[1]}" width="${n(b[0] - a[0])}" height="${n(b[1] - a[1])}" stroke="${resolveColor(v.c, v.l, null)}"/>`);
+    });
+    walk('P' + S.sheet, I, null, 0);
+  }
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${n(W)}" height="${n(H)}" viewBox="0 0 ${n(W)} ${n(H)}">\n<title>${xmlEsc(S.name)}${L ? ' - ' + xmlEsc(L.name) : ''}</title>\n${defs.length ? '<defs>' + defs.join('') + '</defs>\n' : ''}<rect width="100%" height="100%" fill="${bgColor()}"/>\n<g fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" font-family="Arial, Helvetica, sans-serif">\n${out.join('\n')}\n</g>\n</svg>\n`;
 }
 function exportSvg() { const data = buildSvg(); S.lastExport = { format: 'svg', bytes: data.length }; vscode.postMessage({ type: 'export', format: 'svg', data }); }
 
@@ -370,7 +433,9 @@ function info(m) {
 function notes(m) {
   const list = [];
   if (m.notDrawn.length) list.push(`Counted but not drawn: ${m.notDrawn.join(', ')}.`);
-  if (m.paperSpace) list.push(`${m.paperSpace} paper space entities are not shown. The view shows model space.`);
+  if (m.layouts && m.layouts.length) list.push(`${m.layouts.length} paper space ${m.layouts.length === 1 ? 'sheet' : 'sheets'} with ${m.layouts.reduce((a, L) => a + L.vps.length, 0)} viewports. Pick one in the Sheet list.`);
+  else if (m.paperSpace) list.push(`${m.paperSpace} paper space entities are not shown. The view shows model space.`);
+  if (m.hatch && m.hatch.tinted) list.push(`${m.hatch.tinted} pattern ${m.hatch.tinted === 1 ? 'hatch is' : 'hatches are'} too dense to draw as lines and ${m.hatch.tinted === 1 ? 'shows' : 'show'} as a light tint.`);
   if (m.missingBlocks) list.push(`${m.missingBlocks} inserts point to blocks that are missing or empty.`);
   if (m.endedEarly) list.push('The file ends without the DXF end marker (EOF). It may be cut off; everything up to that point is shown.');
   if (m.truncated) list.push(`The drawing has more than ${m.primTotal.toLocaleString()} shapes. Only the first ones are drawn.`);
@@ -379,15 +444,56 @@ function notes(m) {
 
 function button(label, act, fn, title) { return el('button', { 'data-act': act, title: title || label, onclick: fn }, label); }
 
+function setSheet(i) {
+  S.sheet = i; S.mpts = []; S.snapPt = null;
+  if (sheetSel) sheetSel.value = String(i);
+  runFind(S.find.q, false);
+  fit();
+}
+
+/** Find text: case-insensitive match in TEXT, MTEXT and attributes of the model or the sheet on screen. */
+function textsNow() { return S.sheet >= 0 ? S.model.layouts[S.sheet].texts : S.model.texts; }
+function runFind(q, jump = true) {
+  const F = S.find;
+  F.q = q; F.i = -1; F.hits = [];
+  F.hits = findTexts(textsNow(), q, S.hidden);
+  if (jump && F.hits.length) gotoHit(0); else { findStatus(); draw(); }
+}
+function gotoHit(i) {
+  const F = S.find;
+  if (!F.hits.length) return;
+  F.i = ((i % F.hits.length) + F.hits.length) % F.hits.length;
+  const t = F.hits[F.i], r = canvas.getBoundingClientRect();
+  const box = hitBox(t), xs = box.map((p) => p[0]), ys = box.map((p) => p[1]);
+  const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+  let s = S.view.s;
+  if (t.h * s < 14 || t.h * s > 120) s = 28 / t.h;
+  const wMax = Math.max(...xs) - Math.min(...xs);
+  if (wMax * s > r.width * 0.9) s = r.width * 0.9 / wMax;
+  S.view = { cx, cy, s };
+  findStatus(); draw();
+}
+function findStatus() {
+  if (!findCount) return;
+  const F = S.find;
+  findCount.textContent = !F.q.trim() ? '' : F.hits.length ? `${F.i + 1} of ${F.hits.length}` : 'No match';
+}
+
 function showModel(msg) {
   const m = msg.model;
+  const keep = msg.reload && S.model ? { view: S.view, hidden: new Set([...S.hidden].map((i) => S.model.layers[i] && S.model.layers[i].name)), sheet: S.model.layouts && S.model.layouts[S.sheet] ? S.model.layouts[S.sheet].name : null, q: S.find.q } : null;
   S.model = m; S.name = msg.name; S.sizeText = msg.sizeText; S.ms = msg.ms; S.cache = new Map(); S.rendered = false;
-  S.hidden = new Set(); m.layers.forEach((L, i) => { if (!L.on || L.frozen) S.hidden.add(i); });
+  S.hidden = new Set(); m.layers.forEach((L, i) => { if (keep ? keep.hidden.has(L.name) : (!L.on || L.frozen)) S.hidden.add(i); });
+  S.sheet = keep && keep.sheet !== null ? m.layouts.findIndex((L) => L.name === keep.sheet) : -1;
+  S.find = { q: keep ? keep.q : '', hits: [], i: -1 };
+  if (keep) S.reloads++;
   const total = Object.values(m.counts).reduce((a, b) => a + b, 0);
   const head = el('div', { class: 'head' },
     el('div', { class: 'title' }, el('span', { class: 'fname', text: msg.name }), el('span', { class: 'meta', text: `${msg.sizeText} · ${m.format === 'binary' ? 'binary' : 'ASCII'} DXF · ${m.versionName} · ${total.toLocaleString()} entities · ${m.layers.length} layers` })),
     el('div', { class: 'tools' },
       button('Fit', 'fit', fit, 'Fit the drawing (F)'), button('+', 'zoomin', () => zoomAt(1.5), 'Zoom in (+)'), button('−', 'zoomout', () => zoomAt(1 / 1.5), 'Zoom out (-)'),
+      sheetPicker(m),
+      findBox(),
       button('Measure', 'measure', () => setMeasure(!S.measure), 'Measure a distance (M)'),
       button(S.bg === 'dark' ? 'Light background' : 'Dark background', 'bg', () => setBg(S.bg === 'dark' ? 'light' : 'dark'), 'Switch background (B)'),
       button('Export PNG', 'png', exportPng, 'Save the current view as a PNG image'), button('Export SVG', 'svg', exportSvg, 'Save the current view as an SVG file'),
@@ -407,14 +513,51 @@ function showModel(msg) {
   if (supportLine) bar.append(supportLine);
   wrapEl = el('div', { class: 'canvaswrap' }, canvas, bar);
   wrapEl.dataset.bg = S.bg;
-  const toast = el('div', { class: 'toast', hidden: '' });
-  app.replaceChildren(head, el('div', { class: 'main' }, side, wrapEl), toast);
+  const toastEl = el('div', { class: 'toast', hidden: '' });
+  app.replaceChildren(head, el('div', { class: 'main' }, side, wrapEl), toastEl);
   renderLayers();
   bindCanvas();
-  new ResizeObserver(() => draw()).observe(wrapEl);
+  // When a bar above or below wraps (Measure text, a narrow window) the canvas changes size. Keep the drawing
+  // anchored at the canvas's top left corner so it never slides away under the cursor.
+  let lastBox = null;
+  new ResizeObserver(() => {
+    const r = canvas.getBoundingClientRect();
+    if (lastBox && S.view.s > 0 && (r.width !== lastBox.w || r.height !== lastBox.h)) {
+      S.view = { s: S.view.s, cx: S.view.cx + (r.width - lastBox.w) / (2 * S.view.s), cy: S.view.cy + (lastBox.h - r.height) / (2 * S.view.s) };
+    }
+    lastBox = { w: r.width, h: r.height };
+    draw();
+  }).observe(canvas);
   S.loaded = true;
-  requestAnimationFrame(() => fit());
+  if (keep) { S.view = keep.view; runFind(S.find.q, false); draw(); toast('The file changed on disk. The drawing was read again.'); }
+  else requestAnimationFrame(() => fit());
 }
+
+function sheetPicker(m) {
+  sheetSel = null;
+  if (!m.layouts || !m.layouts.length) return null;
+  sheetSel = el('select', { 'data-act': 'sheet', title: 'Model space or a paper space sheet (layout)', 'aria-label': 'Sheet' },
+    el('option', { value: '-1', text: 'Model' }), ...m.layouts.map((L, i) => el('option', { value: String(i), text: L.name })));
+  sheetSel.value = String(S.sheet);
+  sheetSel.addEventListener('change', () => setSheet(Number(sheetSel.value)));
+  return el('label', { class: 'sheet' }, 'Sheet ', sheetSel);
+}
+
+function findBox() {
+  findInput = el('input', { type: 'search', class: 'find', placeholder: 'Find text', 'aria-label': 'Find text in the drawing', title: 'Find text, attributes and MTEXT (Ctrl+F or Cmd+F). Enter goes to the next match, Shift+Enter to the one before' });
+  findInput.value = S.find.q;
+  findCount = el('span', { class: 'findcount', 'aria-live': 'polite' });
+  findInput.addEventListener('input', () => runFind(findInput.value, true));
+  findInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); if (S.find.q !== findInput.value) runFind(findInput.value, true); else gotoHit(S.find.i + (e.shiftKey ? -1 : 1)); }
+    else if (e.key === 'Escape') { findInput.value = ''; runFind('', false); canvas.focus(); }
+  });
+  return el('span', { class: 'findwrap' }, findInput, findCount);
+}
+
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'f' || e.key === 'F') && findInput) { e.preventDefault(); findInput.focus(); findInput.select(); }
+}, true);
 
 function bindCanvas() {
   let drag = null;
@@ -492,6 +635,8 @@ window.addEventListener('message', (ev) => {
 window.dxfViewerProbe = () => ({
   loaded: S.loaded, notice: S.notice || null, bg: S.bg, measure: S.measure, mpts: S.mpts, result: measureText(), view: S.view, draws: S.draws, drawMs: S.drawMs,
   hidden: [...S.hidden].map((i) => S.model && S.model.layers[i].name), layers: S.model ? S.model.layers.length : 0,
+  sheet: S.sheet, sheets: S.model && S.model.layouts ? S.model.layouts.map((L) => L.name) : [], find: { q: S.find.q, hits: S.find.hits.length, i: S.find.i, hit: S.find.hits[S.find.i] ? S.find.hits[S.find.i].s : null },
+  hatch: S.model ? S.model.hatch : null, reloads: S.reloads,
   counts: S.model ? S.model.counts : null, lastExport: S.lastExport, lastSaved: S.lastSaved || null,
 });
 

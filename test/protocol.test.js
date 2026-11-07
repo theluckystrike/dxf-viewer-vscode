@@ -77,3 +77,8 @@ test('host code: no network modules and no writes outside the export path', () =
   const ext = fs.readFileSync(path.join(dir, 'extension.js'), 'utf8');
   assert.equal((ext.match(/writeFile\(/g) || []).length, 1, 'one write: the export the user picked');
 });
+
+test('webview code: no local name shadows the toast() helper (a reload once threw "toast is not a function")', () => {
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'webview', 'main.js'), 'utf8');
+  assert.equal((src.match(/\b(const|let|var)\s+toast\b/g) || []).length, 0);
+});

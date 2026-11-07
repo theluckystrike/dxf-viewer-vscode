@@ -1,8 +1,8 @@
 {
   "name": "dxf-viewer",
   "displayName": "DXF Viewer & CAD Viewer for 2D Drawings",
-  "description": "DXF viewer and CAD viewer that opens ASCII and binary .dxf drawings in VS Code with layers, pan, zoom, measure, blocks, text, dimensions and PNG or SVG export.",
-  "version": "0.1.4",
+  "description": "DXF viewer and CAD viewer that opens ASCII and binary .dxf drawings in VS Code with paper space sheets, hatch patterns, layers, find text, measure and PNG or SVG export.",
+  "version": "0.2.0",
   "publisher": "zovo",
   "license": "MIT",
   "icon": "icon.png",
@@ -46,8 +46,8 @@
     "laser cutting",
     "cnc",
     "dwg to dxf",
-    "vector drawing",
-    "viewer",
+    "paper space",
+    "hatch",
     "offline"
   ],
   "main": "./dist/extension.js",
@@ -142,6 +142,11 @@
             "White background, like a printed sheet"
           ],
           "description": "Background of the drawing when a file opens. The toolbar button switches it per tab."
+        },
+        "dxfViewer.liveReload": {
+          "type": "boolean",
+          "default": true,
+          "description": "Read the drawing again when the file changes on disk, for example after you export it again from your CAD program. The view, sheet and hidden layers stay as they were."
         },
         "dxfViewer.askForRating": {
           "type": "boolean",

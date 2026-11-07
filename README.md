@@ -1,15 +1,17 @@
 # DXF Viewer & CAD Viewer for 2D Drawings
 
-Open `.dxf` drawings in VS Code and check layers, sizes and distances without leaving the editor or starting a CAD program.
+Open `.dxf` drawings in VS Code and check sheets, layers, sizes and distances without leaving the editor or starting a CAD program.
 
-![DXF Viewer showing a floor plan with the layers panel, entity counts and the drawing](images/floor-plan.png)
+![DXF Viewer showing the A-101 paper space sheet with its title block and a 1:100 viewport of the floor plan](images/sheets.png)
 
-*Screenshot of VS Code 1.142 with a floor plan made by `scripts/make-samples.js`.*
+*Screenshot of VS Code 1.142 with `house-sheets.dxf` made by `scripts/make_sheet_sample.py`.*
 
-- Reads ASCII and binary DXF, from R12 to AutoCAD 2018 files, with blocks, nested inserts, text, dimensions and hatches.
-- Hide or show each layer, see how many entities of each type the file holds, and measure with snapping to ends and centres.
-- Save the view as a PNG image or an SVG file for a ticket, a pull request or the docs.
-- Works offline. The drawing is never changed.
+- Sheets (paper space layouts): pick a layout in the Sheet list and see it the way it prints: title block, viewports at their scale, and layers frozen in a single viewport left out.
+- Hatch patterns: ANSI31, NET, brick and other pattern hatches are drawn as their real lines, cut at the boundary and around islands.
+- Find text: Ctrl+F (Cmd+F on a Mac) finds text, MTEXT and block attributes such as tag numbers, and zooms to each match.
+- Live reload: export the DXF again from your CAD program and the open view updates, with the same zoom, sheet and layers.
+- Reads ASCII and binary DXF, from R12 to AutoCAD 2018 files, with blocks, nested inserts, text and dimensions. Hide or show each layer, and measure with snapping to ends and centres.
+- Save the view as a PNG image or an SVG file for a ticket, a pull request or the docs. Works offline. The drawing is never changed.
 
 ## Quick start
 
@@ -20,6 +22,8 @@ Open `.dxf` drawings in VS Code and check layers, sizes and distances without le
 
 | Action | How |
 |---|---|
+| Switch sheet | Pick Model or a layout in the Sheet list. Only drawings with paper space show the list |
+| Find text | Type in Find text, or press Ctrl+F (Cmd+F). Enter goes to the next match and Shift+Enter to the one before. It searches the sheet on screen and skips hidden layers |
 | Pan | Drag with the mouse, or use the arrow keys |
 | Zoom | Scroll at the point you want, or the + and − buttons |
 | Fit the drawing | Fit button, F, or a double-click |
@@ -27,6 +31,8 @@ Open `.dxf` drawings in VS Code and check layers, sizes and distances without le
 | Measure | Measure button or M, then click two points. You get the distance in the drawing units, ΔX, ΔY and the angle. Copy puts the line on the clipboard |
 | Background | Dark like most CAD programs, or white like a printed sheet (B) |
 | Export | Export PNG saves the view at twice the screen resolution. Export SVG saves the visible layers as paths and text |
+
+![Find text: the tag V-7, a block attribute, found and framed in the floor plan](images/find.png)
 
 ![Measuring the outer wall of the sample floor plan](images/measure.png)
 
@@ -36,7 +42,11 @@ The side panel lists the layers with their colour and entity count, a table of e
 
 ## What gets drawn
 
-LINE, CIRCLE, ARC, ELLIPSE, LWPOLYLINE and POLYLINE (bulges too), SPLINE, POINT, SOLID, TRACE, 3DFACE, HATCH (solid fill, pattern hatches as a light tint with their outline), TEXT, MTEXT, ATTRIB, INSERT with arrays and nested blocks, DIMENSION and LEADER. Dimensions use the block the CAD program saved with them, and when it's missing the viewer draws them from their definition points.
+LINE, CIRCLE, ARC, ELLIPSE, LWPOLYLINE and POLYLINE (bulges too), SPLINE, POINT, SOLID, TRACE, 3DFACE, HATCH, TEXT, MTEXT, ATTRIB, INSERT with arrays and nested blocks, DIMENSION, LEADER and VIEWPORT. Dimensions use the block the CAD program saved with them, and when it's missing the viewer draws them from their definition points.
+
+Pattern hatches use the pattern lines stored in the DXF file, with their angle, spacing and dashes. When you zoom out so far that the lines would sit less than 2 pixels apart, the hatch shows as a light tint until you zoom in again. A pattern with more than 4,000 lines in one hatch also shows as a tint, and the panel says so.
+
+Paper space sheets come from the LAYOUT objects in the file, in their tab order. Each viewport shows model space at its own scale and twist, clipped to its frame, without the layers it freezes. Files with paper space but no layout list (R12) get one sheet.
 
 Colours follow the layer, the block or the entity (ACI and true colour). Dashed and centre linetypes come from the file. Other entity types, such as 3DSOLID, IMAGE or XLINE, are counted in the table and marked as not drawn.
 
@@ -53,6 +63,8 @@ If you use another extension for DWG files, the page has a button to reopen the 
 
 ![The DWG page with the version and the DXF export steps](images/dwg.png)
 
+![The A-501 detail sheet: a 1:25 viewport with the furniture layer frozen and a key plan viewport, next to pattern hatches](images/hatch-patterns.png)
+
 ## Big files
 
 The file is read in a worker thread, so VS Code stays responsive while it loads. A 24 MB drawing with 600,000 lines is read in about one second. Files over 500 MB show a message and are not read (setting `dxfViewer.maxFileMB`, up to 2048).
@@ -63,6 +75,7 @@ The file is read in a worker thread, so VS Code stays responsive while it loads.
 |---|---|---|
 | `dxfViewer.maxFileMB` | 500 | Largest file to read. |
 | `dxfViewer.background` | auto | Background when a file opens. `auto` follows the VS Code theme. |
+| `dxfViewer.liveReload` | true | Read the drawing again when the file changes on disk. |
 | `dxfViewer.askForRating` | true | Ask one time for a rating after a few days of use. |
 
 ## Privacy
@@ -71,11 +84,11 @@ DXF Viewer makes no network calls and sends no telemetry. The webview runs under
 
 ## Limits
 
-- Model space only. Paper space layouts and viewports are not shown, and the panel says how many paper space entities were skipped.
+- Viewports are drawn as rectangles. A viewport clipped to a polygon shows its rectangular frame, and a 3D view direction is drawn as a top view.
 - 3D entities are drawn flat (top view). 3DSOLID, REGION and BODY hold ACIS data and are not drawn.
 - Text uses a sans-serif font, not the SHX or TrueType font named in the file, so text widths differ a little from CAD.
 - Line weights are not used. Every line is one pixel wide at any zoom.
-- Pattern hatches show as a light tint, not as the pattern lines.
+- Hatch gradients show as a solid fill in the hatch colour.
 
 ## Support Zovo
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0 (2026-11-07)
+
+- Sheets: drawings with paper space get a Sheet list. Each layout shows its title block and its viewports at their scale and twist, clipped to the frame, without the layers frozen in that viewport.
+- Hatch patterns are drawn as their pattern lines (angle, spacing, dashes and dots from the file), cut at the boundary and around islands. Far out, or above 4,000 lines in one hatch, they show as a light tint.
+- Find text: Ctrl+F or Cmd+F finds text, MTEXT and block attributes on the sheet on screen, zooms to each match and frames it. Enter and Shift+Enter step through the matches.
+- Live reload: the view reads the file again when it changes on disk and keeps the zoom, the sheet and the hidden layers. Setting `dxfViewer.liveReload` (default `true`).
+- PNG and SVG export include the sheet on screen with its viewports.
+
 ## 0.1.4 (2026-11-07)
 
 - "More free viewers" now starts with the Zovo extensions most related to this one. Picking one opens its Marketplace page, where you choose to install it.

@@ -16,7 +16,7 @@ let rating = { success() {} };
 
 function settings() {
   const c = vscode.workspace.getConfiguration('dxfViewer');
-  return { maxFileMB: c.get('maxFileMB', 500), background: c.get('background', 'auto') };
+  return { maxFileMB: c.get('maxFileMB', 500), background: c.get('background', 'auto'), liveReload: c.get('liveReload', true) };
 }
 
 /** Parse in a worker thread so a big drawing never blocks the extension host. */
@@ -66,7 +66,7 @@ class DxfEditorProvider {
     let job = null;
     const post = (m) => (disposed ? Promise.resolve(false) : panel.webview.postMessage(m));
 
-    const load = async () => {
+    const load = async (reload = false) => {
       if (job) job.cancel();
       const stat = await vscode.workspace.fs.stat(uri);
       const s = settings();
@@ -87,7 +87,7 @@ class DxfEditorProvider {
       job = parseInWorker(path.join(ctx.extensionUri.fsPath, 'dist', 'worker.js'), data);
       try {
         const model = await job.promise;
-        await post({ type: 'model', model, name, sizeText: fmtSize(stat.size), ms: Date.now() - t0 });
+        await post({ type: 'model', model, name, sizeText: fmtSize(stat.size), ms: Date.now() - t0, reload });
       } catch (e) {
         await post({ type: 'error', message: e.message });
       } finally { job = null; }
@@ -124,7 +124,16 @@ class DxfEditorProvider {
         await post({ type: 'error', message: e && e.message ? e.message : String(e) });
       }
     });
-    panel.onDidDispose(() => { disposed = true; if (job) job.cancel(); });
+    // Live reload: when the drawing is saved again (for example from a CAD program), read it again and keep the view.
+    let watcher = null, timer = null;
+    if (this.kind === 'dxf' && settings().liveReload) {
+      try {
+        watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.joinPath(uri, '..'), name));
+        const changed = () => { clearTimeout(timer); timer = setTimeout(() => { if (!disposed) load(true).catch((e) => post({ type: 'error', message: e && e.message ? e.message : String(e) })); }, 400); };
+        watcher.onDidChange(changed); watcher.onDidCreate(changed);
+      } catch { watcher = null; /* no watcher for this file system: the view stays as read */ }
+    }
+    panel.onDidDispose(() => { disposed = true; clearTimeout(timer); if (watcher) watcher.dispose(); if (job) job.cancel(); });
   }
 }
 
