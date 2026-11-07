@@ -2,7 +2,7 @@
   "name": "dxf-viewer",
   "displayName": "DXF Viewer & CAD Viewer for 2D Drawings",
   "description": "DXF viewer and CAD viewer that opens ASCII and binary .dxf drawings in VS Code with paper space sheets, hatch patterns, layers, find text, measure and PNG or SVG export.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "zovo",
   "license": "MIT",
   "icon": "icon.png",

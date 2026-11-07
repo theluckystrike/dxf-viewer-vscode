@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1 (2026-11-08)
+
+- The "More free viewers" list and the README now use the current Marketplace names and include the newest Zovo extensions: ZIP, GCode, EPUB, HAR, font and audio viewers.
+
 ## 0.2.0 (2026-11-07)
 
 - Sheets: drawings with paper space get a Sheet list. Each layout shows its title block and its viewports at their scale and twist, clipped to the frame, without the layers frozen in that viewport.
